@@ -1,11 +1,11 @@
 const { Client, GatewayIntentBits, Events } = require("discord.js");
 const {
   joinVoiceChannel,
-  VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
-  NoSubscriberBehavior
+  NoSubscriberBehavior,
+  VoiceConnectionStatus
 } = require("@discordjs/voice");
 const express = require("express");
 const { Readable } = require("stream");
@@ -24,11 +24,13 @@ const client = new Client({
   ]
 });
 
+/* ================= GLOBAL ================= */
 let connection = null;
 let player = null;
+let connecting = false;
 
-/* ================= SESSİZ AUDIO (AFK KORUMA) ================= */
-function createSilentStream() {
+/* ================= SESSİZ SES (AFK KORUMA) ================= */
+function silentStream() {
   return new Readable({
     read() {
       this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence
@@ -36,33 +38,37 @@ function createSilentStream() {
   });
 }
 
-function startSilentLoop() {
+function startSilentPlayer() {
   if (!player) {
     player = createAudioPlayer({
-      behaviors: {
-        noSubscriber: NoSubscriberBehavior.Play
-      }
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play }
     });
 
     player.on(AudioPlayerStatus.Idle, () => {
-      player.play(createAudioResource(createSilentStream()));
+      player.play(createAudioResource(silentStream()));
     });
   }
 
-  player.play(createAudioResource(createSilentStream()));
+  player.play(createAudioResource(silentStream()));
   connection.subscribe(player);
 }
 
 /* ================= VOICE CONNECT ================= */
 async function connectVoice() {
-  try {
-    const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
-    if (!guild) return setTimeout(connectVoice, 5000);
+  if (connecting) return;
+  connecting = true;
 
-    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID).catch(() => null);
+  try {
+    if (connection) {
+      connection.destroy();
+      connection = null;
+    }
+
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
+
     if (!channel || !channel.isVoiceBased()) {
-      console.log("❌ Geçerli bir ses kanalı bulunamadı");
-      return setTimeout(connectVoice, 5000);
+      throw new Error("Ses kanalı geçersiz");
     }
 
     connection = joinVoiceChannel({
@@ -70,22 +76,24 @@ async function connectVoice() {
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: true,   // 🔇 kulaklık kapalı
-      selfMute: false   // 🎤 mikrofon AÇIK
+      selfMute: false   // 🎤 mikrofon açık
     });
 
     connection.once(VoiceConnectionStatus.Ready, () => {
       console.log("🔊 Ses kanalına bağlanıldı");
-      startSilentLoop();
+      startSilentPlayer();
     });
 
     connection.once(VoiceConnectionStatus.Disconnected, () => {
-      console.log("⚠️ Voice disconnect, tekrar bağlanılıyor");
+      console.log("⚠️ Ses bağlantısı koptu, yeniden deneniyor");
       setTimeout(connectVoice, 3000);
     });
 
   } catch (err) {
     console.log("⚠️ Bağlanma hatası, tekrar deneniyor");
     setTimeout(connectVoice, 5000);
+  } finally {
+    connecting = false;
   }
 }
 
@@ -110,4 +118,5 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
 process.on("unhandledRejection", () => {});
 process.on("uncaughtException", () => {});
 
+/* ================= LOGIN ================= */
 client.login(process.env.TOKEN);
