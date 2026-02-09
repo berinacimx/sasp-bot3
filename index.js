@@ -8,12 +8,12 @@ const {
 } = require("discord.js");
 const express = require("express");
 
-/* ==================== UPTIME (7/24) ==================== */
+// ==================== UPTIME ====================
 const app = express();
 app.get("/", (req, res) => res.send("Bot Aktif - SASP"));
 app.listen(process.env.PORT || 3000);
 
-/* ==================== CLIENT AYARLARI ==================== */
+// ==================== CLIENT ====================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -23,7 +23,7 @@ const client = new Client({
   partials: [Partials.GuildMember]
 });
 
-/* ==================== DURUM DÖNGÜSÜ (STREAMING) ==================== */
+// ==================== DURUM DÖNGÜSÜ ====================
 client.once(Events.ClientReady, async () => {
   console.log(`🤖 Bot aktif: ${client.user.tag}`);
 
@@ -31,21 +31,21 @@ client.once(Events.ClientReady, async () => {
 
   setInterval(async () => {
     try {
-      const guild = await client.guilds.fetch(process.env.GUILD_ID);
-      await guild.members.fetch({ withPresences: true });
+      const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+      if (!guild) return;
+
+      await guild.members.fetch({ withPresences: true }).catch(() => {});
 
       const online = guild.members.cache.filter(
         m => m.presence && m.presence.status !== "offline"
       ).size;
 
       if (toggle) {
-        // Durum 1: SASP ❤️ Rispect
         client.user.setActivity("SASP ❤️ Rispect", {
           type: ActivityType.Streaming,
           url: "https://www.twitch.tv/rispectofficial"
         });
       } else {
-        // Durum 2: İstatistikler
         client.user.setActivity(
           `Çevrimiçi : ${online} | Üye : ${guild.memberCount}`,
           {
@@ -54,7 +54,39 @@ client.once(Events.ClientReady, async () => {
           }
         );
       }
-
       toggle = !toggle;
     } catch (err) {
-      console.error("Durum gün
+      console.error("Durum hatası:", err.message);
+    }
+  }, 30000);
+});
+
+// ==================== OTOROL + HOŞ GELDİN ====================
+client.on(Events.GuildMemberAdd, async (member) => {
+  try {
+    // Otorol
+    const roleId = process.env.AUTOROLE_ID;
+    if (roleId) {
+      const role = member.guild.roles.cache.get(roleId);
+      if (role) await member.roles.add(role).catch(() => {});
+    }
+
+    // Hoş geldin
+    const channelId = process.env.WELCOME_CHANNEL_ID;
+    const channel = member.guild.channels.cache.get(channelId);
+
+    if (channel && channel.isTextBased()) {
+      const welcomeText = `👋 Hoş geldin ${member}\n\n` +
+                          `Sunucumuza hoş geldin 👋\n` +
+                          `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
+                          `**San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍**`;
+      
+      await channel.send(welcomeText).catch(() => {});
+    }
+  } catch (err) {
+    console.error("Hoş geldin hatası:", err.message);
+  }
+});
+
+// ==================== LOGIN ====================
+client.login(process.env.TOKEN);
