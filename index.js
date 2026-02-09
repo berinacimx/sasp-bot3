@@ -1,92 +1,132 @@
-require("dotenv").config();
+const { Client, GatewayIntentBits, Events, ActivityType } = require("discord.js");
 const {
-  Client,
-  GatewayIntentBits,
-  Partials,
-  Events,
-  ActivityType
-} = require("discord.js");
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  NoSubscriberBehavior,
+  VoiceConnectionStatus
+} = require("@discordjs/voice");
 const express = require("express");
+const { Readable } = require("stream");
+require("dotenv").config();
 
-// ==================== UPTIME ====================
+/* ================= EXPRESS (UPTIME) ================= */
 const app = express();
-app.get("/", (req, res) => res.send("Bot Aktif - SASP"));
+app.get("/", (_, res) => res.send("Bot aktif 🚀"));
 app.listen(process.env.PORT || 3000);
 
-// ==================== CLIENT ====================
+/* ================= DISCORD CLIENT ================= */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildPresences
-  ],
-  partials: [Partials.GuildMember]
+    GatewayIntentBits.GuildVoiceStates
+  ]
 });
 
-// ==================== DURUM DÖNGÜSÜ ====================
-client.once(Events.ClientReady, async () => {
-  console.log(`🤖 Bot aktif: ${client.user.tag}`);
+/* ================= GLOBAL ================= */
+let connection = null;
+let player = null;
+let connecting = false;
 
-  let toggle = false;
-
-  setInterval(async () => {
-    try {
-      const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
-      if (!guild) return;
-
-      await guild.members.fetch({ withPresences: true }).catch(() => {});
-
-      const online = guild.members.cache.filter(
-        m => m.presence && m.presence.status !== "offline"
-      ).size;
-
-      if (toggle) {
-        client.user.setActivity("SASP ❤️ Rispect", {
-          type: ActivityType.Streaming,
-          url: "https://www.twitch.tv/rispectofficial"
-        });
-      } else {
-        client.user.setActivity(
-          `Çevrimiçi : ${online} | Üye : ${guild.memberCount}`,
-          {
-            type: ActivityType.Streaming,
-            url: "https://www.twitch.tv/rispectofficial"
-          }
-        );
-      }
-      toggle = !toggle;
-    } catch (err) {
-      console.error("Durum hatası:", err.message);
+/* ================= SESSİZ SES (AFK KORUMA) ================= */
+function createSilentStream() {
+  return new Readable({
+    read() {
+      this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence frame
     }
-  }, 30000);
-});
+  });
+}
 
-// ==================== OTOROL + HOŞ GELDİN ====================
-client.on(Events.GuildMemberAdd, async (member) => {
+function startSilentPlayer() {
+  if (!player) {
+    player = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play }
+    });
+
+    player.on(AudioPlayerStatus.Idle, () => {
+      player.play(createAudioResource(createSilentStream()));
+    });
+  }
+
+  player.play(createAudioResource(createSilentStream()));
+  connection.subscribe(player);
+}
+
+/* ================= VOICE CONNECT ================= */
+async function connectVoice() {
+  if (connecting) return;
+  connecting = true;
+
   try {
-    // Otorol
-    const roleId = process.env.AUTOROLE_ID;
-    if (roleId) {
-      const role = member.guild.roles.cache.get(roleId);
-      if (role) await member.roles.add(role).catch(() => {});
+    if (connection) {
+      connection.destroy();
+      connection = null;
     }
 
-    // Hoş geldin
-    const channelId = process.env.WELCOME_CHANNEL_ID;
-    const channel = member.guild.channels.cache.get(channelId);
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
 
-    if (channel && channel.isTextBased()) {
-      const welcomeText = `👋 Hoş geldin ${member}\n\n` +
-                          `Sunucumuza hoş geldin 👋\n` +
-                          `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
-                          `**San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍**`;
-      
-      await channel.send(welcomeText).catch(() => {});
+    if (!channel || !channel.isVoiceBased()) {
+      throw new Error("Ses kanalı geçersiz");
     }
+
+    connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: guild.id,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: true,   // 🔇 kulaklık kapalı
+      selfMute: false   // 🎤 mikrofon açık
+    });
+
+    connection.once(VoiceConnectionStatus.Ready, () => {
+      console.log("🔊 Ses kanalına bağlanıldı");
+      startSilentPlayer();
+    });
+
+    connection.once(VoiceConnectionStatus.Disconnected, () => {
+      console.log("⚠️ Ses bağlantısı koptu, yeniden bağlanıyor");
+      setTimeout(connectVoice, 3000);
+    });
+
   } catch (err) {
-    console.error("Hoş geldin hatası:", err.message);
+    console.log("⚠️ Bağlanma hatası, tekrar deneniyor");
+    setTimeout(connectVoice, 5000);
+  } finally {
+    connecting = false;
+  }
+}
+
+/* ================= READY (LIVE STATUS) ================= */
+client.once(Events.ClientReady, () => {
+  console.log(`${client.user.tag} aktif`);
+
+  // 🟣 Sabit LIVE status
+  client.user.setPresence({
+    activities: [
+      {
+        name: "SASP ❤️ Rispect",
+        type: ActivityType.Streaming,
+        url: "https://www.twitch.tv/rispectofficial"
+      }
+    ],
+    status: "online"
+  });
+
+  connectVoice();
+});
+
+/* ================= KICK / MOVE KORUMA ================= */
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  if (oldState.member?.id === client.user.id && !newState.channelId) {
+    console.log("🚫 Sesten atıldı, geri giriliyor");
+    setTimeout(connectVoice, 3000);
   }
 });
 
-// ==================== LOGIN ====================
+/* ================= GLOBAL CRASH KORUMA ================= */
+process.on("unhandledRejection", () => {});
+process.on("uncaughtException", () => {});
+
+/* ================= LOGIN ================= */
 client.login(process.env.TOKEN);
