@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Events } = require("discord.js");
+const { Client, GatewayIntentBits, Events, ActivityType } = require("discord.js");
 const {
   joinVoiceChannel,
   createAudioPlayer,
@@ -30,10 +30,10 @@ let player = null;
 let connecting = false;
 
 /* ================= SESSİZ SES (AFK KORUMA) ================= */
-function silentStream() {
+function createSilentStream() {
   return new Readable({
     read() {
-      this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence
+      this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence frame
     }
   });
 }
@@ -45,11 +45,11 @@ function startSilentPlayer() {
     });
 
     player.on(AudioPlayerStatus.Idle, () => {
-      player.play(createAudioResource(silentStream()));
+      player.play(createAudioResource(createSilentStream()));
     });
   }
 
-  player.play(createAudioResource(silentStream()));
+  player.play(createAudioResource(createSilentStream()));
   connection.subscribe(player);
 }
 
@@ -85,7 +85,7 @@ async function connectVoice() {
     });
 
     connection.once(VoiceConnectionStatus.Disconnected, () => {
-      console.log("⚠️ Ses bağlantısı koptu, yeniden deneniyor");
+      console.log("⚠️ Ses bağlantısı koptu, yeniden bağlanılıyor");
       setTimeout(connectVoice, 3000);
     });
 
@@ -100,6 +100,18 @@ async function connectVoice() {
 /* ================= READY ================= */
 client.once(Events.ClientReady, () => {
   console.log(`${client.user.tag} aktif`);
+
+  client.user.setPresence({
+    activities: [
+      {
+        name: "Developed By Rispect",
+        type: ActivityType.Streaming,
+        url: "https://www.twitch.tv/rispectofficial"
+      }
+    ],
+    status: "online"
+  });
+
   connectVoice();
 });
 
