@@ -85,7 +85,7 @@ async function connectVoice() {
     });
 
     connection.once(VoiceConnectionStatus.Disconnected, () => {
-      console.log("⚠️ Ses bağlantısı koptu, yeniden bağlanılıyor");
+      console.log("⚠️ Ses bağlantısı koptu, yeniden bağlanıyor");
       setTimeout(connectVoice, 3000);
     });
 
@@ -97,17 +97,13 @@ async function connectVoice() {
   }
 }
 
-/* ================= READY ================= */
+/* ================= READY (SABİT STATUS) ================= */
 client.once(Events.ClientReady, () => {
   console.log(`${client.user.tag} aktif`);
 
   client.user.setPresence({
     activities: [
-      {
-        name: "Developed By Rispect",
-        type: ActivityType.Streaming,
-        url: "https://www.twitch.tv/rispectofficial"
-      }
+      { name: "SASP ❤️ Rispect", type: ActivityType.Playing }
     ],
     status: "online"
   });
@@ -117,10 +113,7 @@ client.once(Events.ClientReady, () => {
 
 /* ================= KICK / MOVE KORUMA ================= */
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-  if (
-    oldState.member?.id === client.user.id &&
-    !newState.channelId
-  ) {
+  if (oldState.member?.id === client.user.id && !newState.channelId) {
     console.log("🚫 Sesten atıldı, geri giriliyor");
     setTimeout(connectVoice, 3000);
   }
