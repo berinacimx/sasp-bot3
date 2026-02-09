@@ -1,7 +1,6 @@
 const { Client, GatewayIntentBits, Events } = require("discord.js");
 const {
   joinVoiceChannel,
-  entersState,
   VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
@@ -25,15 +24,14 @@ const client = new Client({
   ]
 });
 
-let connection;
-let player;
-let reconnecting = false;
+let connection = null;
+let player = null;
 
 /* ================= SESSİZ AUDIO (AFK KORUMA) ================= */
 function createSilentStream() {
   return new Readable({
     read() {
-      this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence frame
+      this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence
     }
   });
 }
@@ -57,13 +55,15 @@ function startSilentLoop() {
 
 /* ================= VOICE CONNECT ================= */
 async function connectVoice() {
-  if (reconnecting) return;
-  reconnecting = true;
-
   try {
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
-    if (!channel) throw new Error("Ses kanalı yok");
+    const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+    if (!guild) return setTimeout(connectVoice, 5000);
+
+    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID).catch(() => null);
+    if (!channel || !channel.isVoiceBased()) {
+      console.log("❌ Geçerli bir ses kanalı bulunamadı");
+      return setTimeout(connectVoice, 5000);
+    }
 
     connection = joinVoiceChannel({
       channelId: channel.id,
@@ -73,21 +73,19 @@ async function connectVoice() {
       selfMute: false   // 🎤 mikrofon AÇIK
     });
 
-    connection.on("stateChange", (_, newState) => {
-      if (newState.status === VoiceConnectionStatus.Disconnected) {
-        setTimeout(connectVoice, 3000);
-      }
+    connection.once(VoiceConnectionStatus.Ready, () => {
+      console.log("🔊 Ses kanalına bağlanıldı");
+      startSilentLoop();
     });
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-    startSilentLoop();
+    connection.once(VoiceConnectionStatus.Disconnected, () => {
+      console.log("⚠️ Voice disconnect, tekrar bağlanılıyor");
+      setTimeout(connectVoice, 3000);
+    });
 
-    console.log("🔊 Ses kanalına bağlanıldı");
   } catch (err) {
     console.log("⚠️ Bağlanma hatası, tekrar deneniyor");
     setTimeout(connectVoice, 5000);
-  } finally {
-    reconnecting = false;
   }
 }
 
@@ -103,6 +101,7 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     oldState.member?.id === client.user.id &&
     !newState.channelId
   ) {
+    console.log("🚫 Sesten atıldı, geri giriliyor");
     setTimeout(connectVoice, 3000);
   }
 });
