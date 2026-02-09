@@ -97,13 +97,18 @@ async function connectVoice() {
   }
 }
 
-/* ================= READY (SABİT STATUS) ================= */
+/* ================= READY (LIVE STATUS) ================= */
 client.once(Events.ClientReady, () => {
   console.log(`${client.user.tag} aktif`);
 
+  // 🟣 Sabit LIVE status
   client.user.setPresence({
     activities: [
-      { name: "SASP ❤️ Rispect", type: ActivityType.Playing }
+      {
+        name: "SASP ❤️ Rispect",
+        type: ActivityType.Streaming,
+        url: "https://www.twitch.tv/rispectofficial"
+      }
     ],
     status: "online"
   });
