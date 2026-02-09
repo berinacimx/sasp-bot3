@@ -1,132 +1,60 @@
-const { Client, GatewayIntentBits, Events, ActivityType } = require("discord.js");
-const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-  NoSubscriberBehavior,
-  VoiceConnectionStatus
-} = require("@discordjs/voice");
-const express = require("express");
-const { Readable } = require("stream");
 require("dotenv").config();
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  Events,
+  ActivityType
+} = require("discord.js");
+const express = require("express");
 
-/* ================= EXPRESS (UPTIME) ================= */
+/* ==================== UPTIME (7/24) ==================== */
 const app = express();
-app.get("/", (_, res) => res.send("Bot aktif 🚀"));
+app.get("/", (req, res) => res.send("Bot Aktif - SASP"));
 app.listen(process.env.PORT || 3000);
 
-/* ================= DISCORD CLIENT ================= */
+/* ==================== CLIENT AYARLARI ==================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
-  ]
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences
+  ],
+  partials: [Partials.GuildMember]
 });
 
-/* ================= GLOBAL ================= */
-let connection = null;
-let player = null;
-let connecting = false;
+/* ==================== DURUM DÖNGÜSÜ (STREAMING) ==================== */
+client.once(Events.ClientReady, async () => {
+  console.log(`🤖 Bot aktif: ${client.user.tag}`);
 
-/* ================= SESSİZ SES (AFK KORUMA) ================= */
-function createSilentStream() {
-  return new Readable({
-    read() {
-      this.push(Buffer.from([0xF8, 0xFF, 0xFE])); // opus silence frame
-    }
-  });
-}
+  let toggle = false;
 
-function startSilentPlayer() {
-  if (!player) {
-    player = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Play }
-    });
+  setInterval(async () => {
+    try {
+      const guild = await client.guilds.fetch(process.env.GUILD_ID);
+      await guild.members.fetch({ withPresences: true });
 
-    player.on(AudioPlayerStatus.Idle, () => {
-      player.play(createAudioResource(createSilentStream()));
-    });
-  }
+      const online = guild.members.cache.filter(
+        m => m.presence && m.presence.status !== "offline"
+      ).size;
 
-  player.play(createAudioResource(createSilentStream()));
-  connection.subscribe(player);
-}
-
-/* ================= VOICE CONNECT ================= */
-async function connectVoice() {
-  if (connecting) return;
-  connecting = true;
-
-  try {
-    if (connection) {
-      connection.destroy();
-      connection = null;
-    }
-
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
-
-    if (!channel || !channel.isVoiceBased()) {
-      throw new Error("Ses kanalı geçersiz");
-    }
-
-    connection = joinVoiceChannel({
-      channelId: channel.id,
-      guildId: guild.id,
-      adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: true,   // 🔇 kulaklık kapalı
-      selfMute: false   // 🎤 mikrofon açık
-    });
-
-    connection.once(VoiceConnectionStatus.Ready, () => {
-      console.log("🔊 Ses kanalına bağlanıldı");
-      startSilentPlayer();
-    });
-
-    connection.once(VoiceConnectionStatus.Disconnected, () => {
-      console.log("⚠️ Ses bağlantısı koptu, yeniden bağlanıyor");
-      setTimeout(connectVoice, 3000);
-    });
-
-  } catch (err) {
-    console.log("⚠️ Bağlanma hatası, tekrar deneniyor");
-    setTimeout(connectVoice, 5000);
-  } finally {
-    connecting = false;
-  }
-}
-
-/* ================= READY (LIVE STATUS) ================= */
-client.once(Events.ClientReady, () => {
-  console.log(`${client.user.tag} aktif`);
-
-  // 🟣 Sabit LIVE status
-  client.user.setPresence({
-    activities: [
-      {
-        name: "SASP ❤️ Rispect",
-        type: ActivityType.Streaming,
-        url: "https://www.twitch.tv/rispectofficial"
+      if (toggle) {
+        // Durum 1: SASP ❤️ Rispect
+        client.user.setActivity("SASP ❤️ Rispect", {
+          type: ActivityType.Streaming,
+          url: "https://www.twitch.tv/rispectofficial"
+        });
+      } else {
+        // Durum 2: İstatistikler
+        client.user.setActivity(
+          `Çevrimiçi : ${online} | Üye : ${guild.memberCount}`,
+          {
+            type: ActivityType.Streaming,
+            url: "https://www.twitch.tv/rispectofficial"
+          }
+        );
       }
-    ],
-    status: "online"
-  });
 
-  connectVoice();
-});
-
-/* ================= KICK / MOVE KORUMA ================= */
-client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-  if (oldState.member?.id === client.user.id && !newState.channelId) {
-    console.log("🚫 Sesten atıldı, geri giriliyor");
-    setTimeout(connectVoice, 3000);
-  }
-});
-
-/* ================= GLOBAL CRASH KORUMA ================= */
-process.on("unhandledRejection", () => {});
-process.on("uncaughtException", () => {});
-
-/* ================= LOGIN ================= */
-client.login(process.env.TOKEN);
+      toggle = !toggle;
+    } catch (err) {
+      console.error("Durum gün
